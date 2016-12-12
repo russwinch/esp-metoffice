@@ -13,20 +13,16 @@
   retrieve time and use this to decide which forecast to show: day/night/next day
   add option to retrieve current observation
   ability to determine / set the current location (by IP?)
-   
+  ensure blank data is not returned and use previous data if it is (look for a location)
+
 */
 
 #include <ESP8266WiFi.h>
 #include <ArduinoJson.h>
-
-//Wifi settings
-const char ssid[]     = "aaaaaaaaaaa";
-const char password[] = "bbbbbbbbbbb";
+#include "credentials.h" //credentials file with wifi settings and Met Office API key
 
 //Met Office settings
-//register for Met Office Datapoint here: http://www.metoffice.gov.uk/datapoint
 #define METOFFICE "datapoint.metoffice.gov.uk"
-#define MO_API_KEY "cccccccccccccccc"
 #define MO_SITEID "351713" //Hackney
 //To obtain a siteID, call the following to return JSON of all sites:
 //http://datapoint.metoffice.gov.uk/public/data/val/wxfcs/all/json/sitelist?key=<YourAPIKey>
@@ -44,7 +40,7 @@ char *weatherTypes[] = {"Clear night", "Sunny day", "Partly cloudy (night)", "Pa
 // HTTP request
 const char METOFFICE_REQ[] =
   "GET /public/data/val/wxfcs/all/json/" MO_SITEID "?res=daily&key=" MO_API_KEY " HTTP/1.1\r\n"
-//  "GET /public/data/val/wxfcs/all/json/" MO_SITEID "?res=3hourly&key=" MO_API_KEY " HTTP/1.1\r\n" ///testing 3 hourly
+  //  "GET /public/data/val/wxfcs/all/json/" MO_SITEID "?res=3hourly&key=" MO_API_KEY " HTTP/1.1\r\n" ///testing 3 hourly
   "User-Agent: ESP8266/0.1\r\n"
   "Accept: */*\r\n"
   "Host: " METOFFICE "\r\n"
@@ -106,7 +102,7 @@ void loop() {
     if (skip_headers) {
       String aLine = httpclient.readStringUntil('\n');
       Serial.println(aLine);
-      if (aLine.substring(0,4) == "Date") timeStamp = aLine.substring(6); //looking for Date at the start of the line
+      if (aLine.substring(0, 4) == "Date") timeStamp = aLine.substring(6); //looking for Date at the start of the line
       if (aLine.length() <= 1) { // Blank line denotes end of headers
         skip_headers = false;
       }
@@ -179,24 +175,28 @@ bool showWeather(char *json)
   JsonObject& todayNight = root["SiteRep"]["DV"]["Location"]["Period"][0]["Rep"][1];
 
   Serial.println(timeStamp); //current date and time
-  const char *siteName = location["name"];
-  Serial.print("Location: "); Serial.println(siteName);
-  String dataTimeStamp = DV["dataDate"];
-//  Serial.print("Data timestamp: "); Serial.println(dataTimeStamp);
-  Serial.print("Data date: "); Serial.println(dataTimeStamp.substring(0,10));
-  Serial.print("Data time: "); Serial.println(dataTimeStamp.substring(11,16));
-  const int dayMaxTemp = todayDay["Dm"];
-  Serial.print("Max temp: "); Serial.print(dayMaxTemp); Serial.println(" deg C");
-  const int nightMinTemp = todayNight["Nm"];
-  Serial.print("Min temp: "); Serial.print(nightMinTemp); Serial.println(" deg C");
-  const int dayType = todayDay["W"];
-  Serial.print("Day weather type: "); Serial.println(weatherTypes[dayType]);
-  const int nightType = todayNight["W"];
-  Serial.print("Night weather type: "); Serial.println(weatherTypes[nightType]);
-  const int dayPProb = todayDay["PPd"];
-  Serial.print("Day precipitation probability: "); Serial.print(dayPProb); Serial.println("%");
-  const int nightPProb = todayNight["PPn"];
-  Serial.print("Night precipitation probability: "); Serial.print(nightPProb); Serial.println("%");
-
-  return true;
+  String siteName = location["name"];
+  if (siteName.length() != 0) {
+    Serial.print("Location: "); Serial.println(siteName);
+    String dataTimeStamp = DV["dataDate"];
+    //  Serial.print("Data timestamp: "); Serial.println(dataTimeStamp);
+    Serial.print("Data date: "); Serial.println(dataTimeStamp.substring(0, 10));
+    Serial.print("Data time: "); Serial.println(dataTimeStamp.substring(11, 16));
+    const int dayMaxTemp = todayDay["Dm"];
+    Serial.print("Max temp: "); Serial.print(dayMaxTemp); Serial.println(" deg C");
+    const int nightMinTemp = todayNight["Nm"];
+    Serial.print("Min temp: "); Serial.print(nightMinTemp); Serial.println(" deg C");
+    const int dayType = todayDay["W"];
+    Serial.print("Day weather type: "); Serial.println(weatherTypes[dayType]);
+    const int nightType = todayNight["W"];
+    Serial.print("Night weather type: "); Serial.println(weatherTypes[nightType]);
+    const int dayPProb = todayDay["PPd"];
+    Serial.print("Day precipitation probability: "); Serial.print(dayPProb); Serial.println("%");
+    const int nightPProb = todayNight["PPn"];
+    Serial.print("Night precipitation probability: "); Serial.print(nightPProb); Serial.println("%");
+    return true;
+  } else {
+    Serial.println("JSON empty - no data returned");
+    return false;
+  }
 }
