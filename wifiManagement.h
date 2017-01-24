@@ -38,14 +38,16 @@ void saveConfigCallback () {
 
 void configModeCallback (WiFiManager *myWiFiManager) {
   display.clearDisplay(); // Clear the buffer.
+  display.setTextSize(2);
   display.setCursor(0, 0);
-  display.setTextColor(BLACK, WHITE); // 'inverted' text
-  display.println("SSID");
-  display.setTextColor(WHITE, BLACK); // normal text
+  display.setTextColor(WHITE); // normal text
+//  display.setTextColor(BLACK, WHITE); // 'inverted' text
+  display.println("SSID:");
+//  display.setTextColor(WHITE, BLACK); // normal text
   display.println(ap_ssid);
-  display.setTextColor(BLACK, WHITE); // 'inverted' text
-  display.println("Password");
-  display.setTextColor(WHITE, BLACK); // normal text
+//  display.setTextColor(BLACK, WHITE); // 'inverted' text
+  display.println("Password:");
+//  display.setTextColor(WHITE, BLACK); // normal text
   display.println(ap_password);
   display.display();
 
@@ -111,7 +113,7 @@ bool manageWifi() {
   WiFiManagerParameter metoffice_text("<h3>Met Office details</h3><b>Forecast ID</b>");
   WiFiManagerParameter custom_forecast_id("forecast_id", "forecast id", forecast_id, 8);
   WiFiManagerParameter forecast_text("<br>To obtain a forecast site ID, call the following to return JSON of all sites: http://datapoint.metoffice.gov.uk/public/data/val/wxfcs/all/json/sitelist?key=YOUR_API_Key<br><br><b>Observation ID</b>");
-  WiFiManagerParameter custom_observation_id("observation_id", "observation id", observation_id, 16, "Obv ID");
+  WiFiManagerParameter custom_observation_id("observation_id", "observation id", observation_id, 16);
   WiFiManagerParameter observation_text("<br>To obtain an observation site ID, call the following to return JSON of all sites: http://datapoint.metoffice.gov.uk/public/data/val/wxobs/all/json/sitelist?key=YOUR_API_Key<br><br><b>API Key</b>");
   WiFiManagerParameter custom_api_key("api_key", "api key", api_key, 40);
   WiFiManagerParameter api_text("<br>Register for Met Office Datapoint here: <a href='http://www.metoffice.gov.uk/datapoint'>metoffice.gov.uk/datapoint</a>");
