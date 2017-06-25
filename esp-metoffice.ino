@@ -49,13 +49,8 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-
-// checking the right version of the OLED library is included, should support 64x48
-//#if (SSD1306_LCDHEIGHT != 48)
-//#error("Height incorrect, please fix Adafruit_SSD1306.h!");
-//#endif
-
-//***now 128x64!
+#include <OneWire.h>
+#include <Adafruit_NeoPixel.h>
 
 #include "credentials.h" //credentials file with wifi settings and Met Office API key
 #include "bitmaps.h" //bitmaps file
@@ -65,14 +60,25 @@ bool logging = true;
 //bool logging = false;
 
 // pin definitions
-const int redPin = D7;
-const int greenPin = D6;
-const int bluePin = D5;
+//const int redPin = D4;
+//const int greenPin = D4;
+//const int bluePin = D4;
 const int switchPin = D8; //built in pull-down
-const int motionPin = A0;
+OneWire ds(D6);  // DS18B20 on pin 5 (a 4.7K resistor is necessary) ***PIN 4 doesnt work!!
+//const int motionPin = A0;
 // SCL GPIO5 (D1)
 // SDA GPIO4 (D2)
 #define OLED_RESET D3  // GPIO0
+
+//const int pixelPin = D6; //NeoPixel pin
+#define PIXELPIN D5
+#define NUMPIXELS 1 //total NeoPixels
+
+// When we setup the NeoPixel library, we tell it how many pixels, and which pin to use to send signals.
+// Note that for older NeoPixel strips you might need to change the third parameter--see the strandtest
+// example for more information on possible values.
+Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, PIXELPIN, NEO_GRB + NEO_KHZ800);
+
 
 Adafruit_SSD1306 display(OLED_RESET);
 
@@ -90,9 +96,6 @@ char api_key[40]; //api key
 
 // 1 minute between update checks.
 long updateDelay = (5 * 60000);
-
-////total number of APIs. increase when adding new apis :)
-//const int totalReqs = 5;
 
 // string variables
 const char *weatherTypes[] = {"Clear night", "Sunny day", "Partly cloudy (night)", "Partly cloudy (day)", "Not used", "Mist", "Fog", "Cloudy", "Overcast", "Light rain shower (night)", "Light rain shower (day)", "Drizzle", "Light rain", "Heavy rain shower (night)", "Heavy rain shower (day)", "Heavy rain", "Sleet shower (night)", "Sleet shower (day)", "Sleet", "Hail shower (night)", "Hail shower (day)", "Hail", "Light snow shower (night)", "Light snow shower (day)", "Light snow", "Heavy snow shower (night)", "Heavy snow shower (day)", "Heavy snow", "Thunder shower (night)", "Thunder shower (day)", "Thunder"};
@@ -144,48 +147,40 @@ unsigned long lastUpdateAttempt;
 
 // modes
 int currentMode = 0;
-//int displayTimeout = 10000;
 unsigned long displayTimeout = 20000;
 bool displayOff = false;
-
 
 // switch
 bool switchReading;
 bool lastSwitchReading;
 unsigned long lastDebounceTime = 0;
 
-//motion
-bool motionReading;
-bool lastMotionReading;
-unsigned long lastMotionDebounceTime;
-long aRead;
-
-
-
 // leds
 int RGB;
 //int targetRGB;
 
+//indoor temperature
+float indoorTemp;
+
 void setup() {
   //inputs
-  pinMode (motionPin, INPUT);
   pinMode (switchPin, INPUT);
 
   //outputs
-  pinMode (redPin, OUTPUT);
-  pinMode (greenPin, OUTPUT);
-  pinMode (bluePin, OUTPUT);
+  //  pinMode (redPin, OUTPUT);
+  //  pinMode (greenPin, OUTPUT);
+  //  pinMode (bluePin, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
 
   //turn leds off
   analogWrite(LED_BUILTIN, 1023);
   updateRGB(0);
 
-  Serial.begin(115200);
+  if (logging) Serial.begin(115200);
 
   // by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3C
-
+  display.setRotation(2);
   // Show image buffer on the display hardware.
   // Since the buffer is intialized with an Adafruit splashscreen
   // internally, this will display the splashscreen.
@@ -199,6 +194,8 @@ void setup() {
 
   if (manageWifi()); //launch wifi using WifiManager
 
+  pixels.begin(); // This initializes the NeoPixel library.
+
   //*****testing JSON read
   Serial.println("reading values from JSON");
   //  Serial.print("forecast ID: "); Serial.println(forecast_id); //forecast site ID
@@ -206,14 +203,14 @@ void setup() {
   //  Serial.print("API key: "); Serial.println(api_key); //api key
 
   if (updateData()) updateDisplay(0); //update
-  lastMotionDebounceTime = millis(); //prevent immediate screen timeout
+  lastDebounceTime = millis(); //prevent immediate screen timeout
+
 }
 
 
 void loop() {
-  //  read switch and motion sensor
-  long oldARead = aRead;
-  if (readSwitch() == HIGH || readMotion()) {
+  //  long oldARead = aRead;
+  if (readSwitch() == HIGH) {
     if (displayOff) currentMode = 0;
     else {
       currentMode++;
@@ -223,17 +220,18 @@ void loop() {
   }
 
   //   timeout the display
-  if (millis() - lastMotionDebounceTime > displayTimeout) {
+  if (millis() - lastDebounceTime > displayTimeout) {
     display.clearDisplay(); // Clear the buffer.
     display.display(); //blank the display
     updateRGB(0);
     displayOff = true;
   }
 
-  if (currentMode == 5 && aRead != oldARead) { //keep updating in IR test mode
-    updateDisplay(currentMode);
-    delay(300);
-  }
+  //  if (currentMode == 5 && aRead != oldARead) { //keep updating in IR test mode
+  //    updateDisplay(currentMode);
+  //    delay(300);
+  //  }
+
   //update data
   if (millis() - lastUpdateAttempt > updateDelay) {
     if (updateData() && !displayOff) updateDisplay(currentMode);
@@ -245,7 +243,7 @@ void loop() {
 
 //char* updateData(int apiId) {
 bool updateData() {
-  const int totalReqs = 6; //6; //number of requests to make - increase when adding new apis :) plus a few bits below...
+  const int totalReqs = 3; //6; //number of requests to make - increase when adding new apis :) plus a few bits below...
   for (int reqid = 0; reqid < totalReqs; reqid++) {
 
     //        Serial.println("****REQ*****");
@@ -363,8 +361,8 @@ bool updateData() {
         break;
     }
 
-//    Serial.println("****REQ TEST***");
-//    Serial.println(httpRequest);
+    //    Serial.println("****REQ TEST***");
+    //    Serial.println(httpRequest);
 
     //trying to retrieve list of sites - too much data...
     //  String FORECAST_SITE_REQ =
@@ -603,16 +601,12 @@ bool updateData() {
         int last; //last observation with weather type
         bool checking = true;
         for (int a = 0; a < 26; a++) {
-          Serial.print("a: ");
-          Serial.println(a);
           if (checking) {
             JsonObject& temp = root["SiteRep"]["DV"]["Location"]["Period"][1]["Rep"][a];
             //            Serial.println(temp); //***additional logging
             if (!temp.containsKey("$")) { //the last observation has been passed
               //identify and move back to last observation with "W", as often missing
               for (int t = 1; t < 6; t++) {
-                Serial.print("t: ");
-                Serial.println(t);
                 JsonObject& temp2 = root["SiteRep"]["DV"]["Location"]["Period"][1]["Rep"][a - t];
                 if (temp2.containsKey("W") && checking) {
                   last = a - t;
@@ -769,6 +763,8 @@ bool updateData() {
       }
     }
   }
+  indoorTemp = readTemp(); //read internal temperature
+
   confirm(9); //flash led white
   return true; //updated successfully **amend this so it all doesn't fail if 1 data item isn't returned?
 }
@@ -940,22 +936,17 @@ void updateDisplay(int displayMode) {
       //      else Serial.print("***NIGHT***");
       break;
 
-    // IR test
+    // Internal Temp
     case 5:
       updateRGB(9); //white
       display.setTextColor(WHITE);
-      //      display.fillRect(0, 0, 84, 32, WHITE);
       display.setCursor(0, 0);
-      //      display.setTextColor(BLACK, WHITE);
       display.setTextSize(2);
-      display.println(aRead);
-      //      display.println(12343.85 * pow(aRead*1.5625, -1.15));
-      //      z = z * 5.0 / 1023.0;
-      float cc = aRead * 3.2 / 1023.0;
-      display.print(27.86 * pow(cc, -1.267));
-      //      display.print(26.707 * pow(cc, -1.267));
-      display.println(" cm");
-
+      display.println("Indoor");
+      display.println();
+      display.print(indoorTemp);
+      display.print((char)247); //degrees symbol
+      display.println("C");
       break;
   }
   display.display();
@@ -1241,10 +1232,15 @@ void updateRGB (int newColour) {
       b = 500;
       break;
   }
+
+  for (int i = 0; i < NUMPIXELS; i++) { // For a set of NeoPixels the first NeoPixel is 0, second is 1, all the way up to the count of pixels minus one.
+    pixels.setPixelColor(i, pixels.Color(r, g, b)); // pixels.Color takes RGB values, from 0,0,0 up to 255,255,255
+    pixels.show(); // This sends the updated pixel color to the hardware.
+  }
   //invert for common anode
-  analogWrite(redPin, 1023 - r);
-  analogWrite(greenPin, 1023 - g);
-  analogWrite(bluePin, 1023 - b);
+  //  analogWrite(redPin, 1023 - r);
+  //  analogWrite(greenPin, 1023 - g);
+  //  analogWrite(bluePin, 1023 - b);
   RGB = newColour;
 }
 
@@ -1262,7 +1258,7 @@ void confirm(int c) { //c = colour
   updateRGB(RGB);
 }
 
-// read and debounce switch
+// read and debounce switch **debounce required with touch sensor? simplify?
 bool readSwitch() {
   int debounceDelay = 50;
   switchReading = digitalRead(switchPin);
@@ -1273,21 +1269,57 @@ bool readSwitch() {
   } else return false;
 }
 
+float readTemp() {
+  byte data[12];
+  byte addr[8];
+  float celsius;
 
-// read and debounce IR distance sensor
-bool readMotion() {
-  //  long aRead;
-  int span = 5;
-  int motionDebounceDelay = 200;
-  for (int i = 0; i < span; i++) {
-    aRead = aRead + analogRead(motionPin);
+  if ( !ds.search(addr)) {
+    ds.reset_search();
+    delay(250);
+    return (0);
   }
-  aRead = aRead / span;
-  motionReading = (aRead > 700) ? true : false;
-  if ((motionReading != lastMotionReading) && ((millis() - lastMotionDebounceTime) > motionDebounceDelay)) {
-    lastMotionReading = motionReading;
-    lastMotionDebounceTime = millis();
-    //        Serial.println(aRead);
-    return motionReading;
-  } else return false;
+  ds.reset();
+  ds.select(addr);
+  ds.write(0x44);        // start conversion, use ds.write(0x44,1) with parasite power on at the end
+  delay(1000);     // maybe 750ms is enough, maybe not
+  // we might do a ds.depower() here, but the reset will take care of it.
+  ds.reset();
+  ds.select(addr);
+  ds.write(0xBE);         // Read Scratchpad
+
+  for (byte i = 0; i < 9; i++) data[i] = ds.read();           // we need 9 bytes
+
+  // Convert the data to actual temperature
+  // because the result is a 16 bit signed integer, it should
+  // be stored to an "int16_t" type, which is always 16 bits
+  // even when compiled on a 32 bit processor.
+  int16_t raw = (data[1] << 8) | data[0];
+  celsius = (float)raw / 16.0;
+  if (logging) {
+    Serial.println();
+    Serial.print("Indoor temperature: ");
+    Serial.print(celsius);
+    Serial.println(" Celsius");
+  }
+  return celsius;
 }
+
+
+//// read and debounce IR distance sensor
+//bool readMotion() {
+//  //  long aRead;
+//  int span = 5;
+//  int motionDebounceDelay = 200;
+//  for (int i = 0; i < span; i++) {
+//    aRead = aRead + analogRead(motionPin);
+//  }
+//  aRead = aRead / span;
+//  motionReading = (aRead > 700) ? true : false;
+//  if ((motionReading != lastMotionReading) && ((millis() - lastMotionDebounceTime) > motionDebounceDelay)) {
+//    lastMotionReading = motionReading;
+//    lastMotionDebounceTime = millis();
+//    //        Serial.println(aRead);
+//    return motionReading;
+//  } else return false;
+//}
